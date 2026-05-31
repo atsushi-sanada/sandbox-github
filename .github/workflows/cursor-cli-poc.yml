@@ -33,6 +33,15 @@ jobs:
         run: |
           agent --version || agent -h || true
 
+      - name: Validate CURSOR_API_KEY
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          if [ -z "${CURSOR_API_KEY}" ]; then
+            echo "::error::CURSOR_API_KEY is not set. Add it in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - name: Run Cursor Agent (file edits only)
         env:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
