@@ -1,0 +1,87 @@
+name: Cursor CLI POC
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_hint:
+        description: "Agent への追加指示（任意）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cursor-cli-poc-main
+  cancel-in-progress: false
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Cursor CLI
+        run: |
+          curl https://cursor.com/install -fsS | bash
+          echo "$HOME/.cursor/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Cursor CLI
+        run: |
+          agent --version || agent -h || true
+
+      - name: Run Cursor Agent (file edits only)
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          RUN_ID="${{ github.run_id }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          UTC_NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          TASK_HINT="${{ github.event.inputs.task_hint }}"
+
+          PROMPT=$(cat <<EOF
+          You are running in GitHub Actions as a restricted Cursor agent.
+
+          IMPORTANT RESTRICTIONS:
+          - Do NOT run git, gh, or any network commands.
+          - Do NOT create branches, commit, or push.
+          - Only read and write files inside this repository working tree.
+
+          TASK:
+          Update docs/poc-report.md for this POC run.
+
+          Required content in docs/poc-report.md:
+          1. Keep the title "# Cursor CLI POC Report"
+          2. Add or update a "## Latest run" section with:
+             - UTC timestamp: ${UTC_NOW}
+             - GitHub Actions run ID: ${RUN_ID}
+             - Run URL: ${RUN_URL}
+             - One short sentence describing that Cursor CLI updated this file from GHA
+          3. Append one row to the "## 実行履歴" table with the same timestamp, run ID, and status "success (agent edit)"
+          4. If TASK_HINT is non-empty, add a "## Agent note" section reflecting it: ${TASK_HINT}
+
+          Keep the document in Japanese. Be concise. Modify only docs/poc-report.md unless TASK_HINT explicitly asks for another file.
+          EOF
+          )
+
+          agent -p --force "$PROMPT"
+
+      - name: Commit and push to main
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "::warning::No file changes detected after agent run."
+            exit 0
+          fi
+
+          git add -A
+          git status
+          git commit -m "docs: update poc-report via Cursor CLI (run ${RUN_ID})"
+          git push origin HEAD:main
